@@ -48,6 +48,7 @@ def image_restitution(df_detected,
     midside_angle_diff_after_tform = []
     corner_angle_diff_before_tform = []
     corner_angle_diff_after_tform = []
+    pixel_pitches = []
     qc_dataframes = []
     
     # convert true coordinates to image reference system
@@ -76,34 +77,47 @@ def image_restitution(df_detected,
             # convert coordinates to camera reference system.
             fiducial_coordinates_mm, principal_point_mm = hipp.qc.convert_coordinates(fiducial_coordinates,
                                                                                       principal_point,
-                                                                                      scanning_resolution_mm = scanning_resolution_mm)
+                                                                                      scanning_resolution_mm = \
+                                                                                      scanning_resolution_mm)
 
             fiducial_coordinates_true_mm, _ = hipp.qc.convert_coordinates(fiducial_coordinates_true,
                                                                           principal_point,
-                                                                          scanning_resolution_mm = scanning_resolution_mm)
-
-            midside_coordinates_mm = fiducial_coordinates_mm[:4]
-            corner_coordinates_mm = fiducial_coordinates_mm[4:]
-            midside_coordinates_true_mm = fiducial_coordinates_true_mm[:4]
-            corner_coordinates_true_mm = fiducial_coordinates_true_mm[4:]
-
+                                                                          scanning_resolution_mm = \
+                                                                          scanning_resolution_mm)
+            
             # compute RMSE for positions before transform.
             rmse = hipp.qc.compute_coordinate_rmse(fiducial_coordinates_mm, fiducial_coordinates_true_mm)
             coordinates_rmse_before_tform.append(rmse)
+            
+            if len(fiducial_coordinates_mm) ==8:
+                midside_coordinates_mm = fiducial_coordinates_mm[:4]
+                midside_coordinates_true_mm = fiducial_coordinates_true_mm[:4]
+                corner_coordinates_mm = fiducial_coordinates_mm[4:]
+                corner_coordinates_true_mm = fiducial_coordinates_true_mm[4:]
 
-            # compute angular offsets for intersection angles at principal point before transform.
-            diff = hipp.qc.compute_angle_diff(midside_coordinates_mm, midside_coordinates_true_mm)
-            midside_angle_diff_before_tform.append(diff)
-            diff = hipp.qc.compute_angle_diff(corner_coordinates_mm, corner_coordinates_true_mm)
-            corner_angle_diff_before_tform.append(diff)
+                # compute angular offsets for intersection angles at principal point before transform.
+                diff = hipp.qc.compute_angle_diff(midside_coordinates_mm, midside_coordinates_true_mm)
+                midside_angle_diff_before_tform.append(diff)
+                diff = hipp.qc.compute_angle_diff(corner_coordinates_mm, corner_coordinates_true_mm)
+                corner_angle_diff_before_tform.append(diff)
 
-            # compute RMSE for distance between principal point and coordinates before transform.
-            rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_mm,
-                                                                 midside_coordinates_true_mm,
-                                                                 corner_coordinates_mm,
-                                                                 corner_coordinates_true_mm)
-            coordinates_pp_dist_rmse_before_tform.append(rmse)
-
+                # compute RMSE for distance between principal point and coordinates before transform.
+                rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_mm,
+                                                                     midside_coordinates_true_mm,
+                                                                     corner_coordinates_mm,
+                                                                     corner_coordinates_true_mm)
+                coordinates_pp_dist_rmse_before_tform.append(rmse)
+            
+            elif len(fiducial_coordinates_mm) == 4:
+                midside_coordinates_mm = fiducial_coordinates_mm[:4]
+                midside_coordinates_true_mm = fiducial_coordinates_true_mm[:4]
+                
+                diff = hipp.qc.compute_angle_diff(midside_coordinates_mm, midside_coordinates_true_mm)
+                midside_angle_diff_before_tform.append(diff)
+                rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_mm,
+                                                                     midside_coordinates_true_mm,
+                                                                     None,
+                                                                     None)
 
         if transform_image or crop_image:
             image_file = df_detected[image_file_name_column_name].iloc[index]
@@ -118,11 +132,18 @@ def image_restitution(df_detected,
 
             # ensure at least 3 points are available to compute transform
             if len(fid_coord_tmp) >=3 and ~np.isnan(fid_coord_true_tmp).all():
+
                 tform = tf.AffineTransform()
                 tform.estimate(fid_coord_tmp, fid_coord_true_tmp)
 
                 fiducial_coordinates_tform = tform(fiducial_coordinates)
                 principal_point = tform(principal_point)[0]
+                
+                pixel_pitch_x_tmp = np.round(tform.scale[1],4)
+                pixel_pitch_y_tmp = np.round(tform.scale[0],4)
+                pixel_pitch_tmp = (pixel_pitch_x_tmp*scanning_resolution_mm,
+                                   pixel_pitch_y_tmp*scanning_resolution_mm)
+                pixel_pitches.append(pixel_pitch_tmp)
 
                 if transform_image:
                     # compute inverse transformation matrix
@@ -132,35 +153,45 @@ def image_restitution(df_detected,
 
                 if qc:
                     # convert transformed coordinates to camera reference system.
-                    fiducial_coordinates_tform_mm, principal_point_tform_mm = hipp.qc.convert_coordinates(fiducial_coordinates_tform,
-                                                                                              principal_point,
-                                                                                              scanning_resolution_mm=scanning_resolution_mm)
-
-                    midside_coordinates_tform_mm = fiducial_coordinates_tform_mm[:4]
-                    corner_coordinates_tform_mm = fiducial_coordinates_tform_mm[4:]
-
+                    fiducial_coordinates_tform_mm, principal_point_tform_mm = \
+                    hipp.qc.convert_coordinates(fiducial_coordinates_tform,
+                                                principal_point,
+                                                scanning_resolution_mm=scanning_resolution_mm)
                     # compute RMSE for positions after transform.
-                    rmse = hipp.qc.compute_coordinate_rmse(fiducial_coordinates_tform_mm, fiducial_coordinates_true_mm)
+                    rmse = hipp.qc.compute_coordinate_rmse(fiducial_coordinates_tform_mm, 
+                                                           fiducial_coordinates_true_mm)
                     coordinates_rmse_after_tform.append(rmse)
+                    
 
+                    if len(fiducial_coordinates_tform_mm) ==8:
+                        midside_coordinates_tform_mm = fiducial_coordinates_tform_mm[:4]
+                        corner_coordinates_tform_mm = fiducial_coordinates_tform_mm[4:]
 
-                    # compute angular offsets for intersection angles at principal point after transform.
-                    diff = hipp.qc.compute_angle_diff(midside_coordinates_tform_mm, midside_coordinates_true_mm)
-                    midside_angle_diff_after_tform.append(diff)
-                    diff = hipp.qc.compute_angle_diff(corner_coordinates_tform_mm, corner_coordinates_true_mm)
-                    corner_angle_diff_after_tform.append(diff)
+                        # compute angular offsets for intersection angles at principal point after transform.
+                        diff = hipp.qc.compute_angle_diff(midside_coordinates_tform_mm, midside_coordinates_true_mm)
+                        midside_angle_diff_after_tform.append(diff)
+                        diff = hipp.qc.compute_angle_diff(corner_coordinates_tform_mm, corner_coordinates_true_mm)
+                        corner_angle_diff_after_tform.append(diff)
 
-                    # compute RMSE for distance between principal point and coordinates after transform.
-                    rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_tform_mm,
-                                                                         midside_coordinates_true_mm,
-                                                                         corner_coordinates_tform_mm,
-                                                                         corner_coordinates_true_mm)
-                    coordinates_pp_dist_rmse_after_tform.append(rmse)
+                        # compute RMSE for distance between principal point and coordinates after transform.
+                        rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_tform_mm,
+                                                                             midside_coordinates_true_mm,
+                                                                             corner_coordinates_tform_mm,
+                                                                             corner_coordinates_true_mm)
+                        coordinates_pp_dist_rmse_after_tform.append(rmse)
+                    elif len(fiducial_coordinates_tform_mm) == 4:
+                        midside_coordinates_tform_mm = fiducial_coordinates_tform_mm[:4]
 
-
+                        diff = hipp.qc.compute_angle_diff(midside_coordinates_tform_mm, midside_coordinates_true_mm)
+                        midside_angle_diff_after_tform.append(diff)
+                        
+                        rmse = hipp.qc.compute_coordinate_distance_diff_rmse(midside_coordinates_tform_mm,
+                                                                             midside_coordinates_true_mm,
+                                                                             None,
+                                                                             None)
+                        coordinates_pp_dist_rmse_after_tform.append(rmse)
 
         if crop_image:
-            # print('here')
             principal_point = np.array([int(round(x)) for x in principal_point])
             image_array = hipp.image.crop_about_point(image_array,
                                                       principal_point[::-1], # requires y,x order
@@ -189,6 +220,9 @@ def image_restitution(df_detected,
         qc_dataframes.append(pd.DataFrame(corner_angle_diff_before_tform,
                                           columns=['corner_angle_diff_before_tform']))
         if transform_coords:
+            qc_dataframes.append(pd.DataFrame(pixel_pitches,
+                                              columns=['pixel_pitch_after_tform_x',
+                                                      'pixel_pitch_after_tform_y']))
             qc_dataframes.append(pd.DataFrame(coordinates_rmse_after_tform,
                                               columns=['coordinates_rmse_after_tform']))
             qc_dataframes.append(pd.DataFrame(coordinates_pp_dist_rmse_after_tform,
@@ -233,6 +267,7 @@ def iter_detect_fiducials(image_files_directory = 'input_data/raw_images/',
         if midside_fiducials:
             windows = hipp.core.define_midside_windows(image_array)
         elif corner_fiducials:
+            
             windows = hipp.core.define_corner_windows(image_array)
         else:
             print("Please specify midside or corner fiducials and provide corresponding templates.")
